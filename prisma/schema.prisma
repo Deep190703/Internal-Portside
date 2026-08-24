@@ -1,0 +1,122 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AccountType {
+  LIVE
+  ONBOARDING_IN_PROGRESS
+  DEMO
+  CHURNED
+}
+
+model Tenant {
+  id                String       @id @default(uuid())
+  name              String
+  slug              String       @unique
+  domain            String?
+  logoUrl           String?
+  accountType       AccountType  @default(LIVE)
+  status            String       @default("Active")
+  primaryAdminEmail String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  userMaps          UserTenantMap[]
+  products          Product[]
+  attributes        ProductAttribute[]
+
+  @@index([slug])
+  @@index([accountType])
+}
+
+enum UserRole {
+  SYSTEM_ADMIN
+  ADMIN
+  STORE_MANAGER
+  SALES_REP
+  CUSTOMER_USER
+}
+
+model User {
+  id           String          @id @default(uuid())
+  email        String          @unique
+  passwordHash String
+  fullName     String
+  avatarUrl    String?
+  role         UserRole        @default(STORE_MANAGER)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  tenantMaps   UserTenantMap[]
+}
+
+model UserTenantMap {
+  id        String   @id @default(uuid())
+  userId    String
+  tenantId  String
+  role      UserRole @default(STORE_MANAGER)
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tenantId])
+}
+
+model Product {
+  id               String                 @id @default(uuid())
+  tenantId         String
+  referenceId      String?
+  sku              String
+  title            String
+  show             Boolean                @default(true)
+  status           String                 @default("ACTIVE")
+  minPrice         Float
+  maxPrice         Float
+  moq              Int                    @default(50)
+  stockCount       Int                    @default(100)
+  images           String[]
+  hinges           Json?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  tenant           Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  attributeValues  ProductAttributeValue[]
+
+  @@index([tenantId])
+  @@index([sku])
+}
+
+model ProductAttribute {
+  id           String                 @id @default(uuid())
+  tenantId     String
+  name         String
+  section      String
+  type         String
+  defaultValue String?
+  options      String[]
+  createdAt    DateTime               @default(now())
+
+  tenant       Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  values       ProductAttributeValue[]
+
+  @@unique([tenantId, name])
+}
+
+model ProductAttributeValue {
+  id          String           @id @default(uuid())
+  productId   String
+  attributeId String
+  value       String
+  createdAt   DateTime         @default(now())
+
+  product     Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  attribute   ProductAttribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, attributeId])
+}
