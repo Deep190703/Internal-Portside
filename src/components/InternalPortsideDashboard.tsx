@@ -1,71 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Building2, Plus, Search, KeyRound, ExternalLink, 
   ShieldAlert, Clock, AlertTriangle, X, 
-  Filter, UserCheck, BarChart3
+  Filter, UserCheck, BarChart3, RefreshCw
 } from 'lucide-react';
 import type { Tenant, AccountType } from '../types';
-
-const INITIAL_TENANTS: Tenant[] = [
-  {
-    id: 'tenant-aarav-exports-101',
-    name: 'Aarav Exports',
-    slug: 'aarav-exports',
-    domain: 'aaravexports.portside.app',
-    logoUrl: 'https://images.unsplash.com/photo-1560179707-f14e90ef3623?w=100&auto=format&fit=crop&q=80',
-    accountType: 'Live',
-    status: 'Active',
-    primaryAdminEmail: 'aarav@aaravexports.com',
-    primaryAdminName: 'Aarav Gupta',
-    productsCount: 386,
-    usersCount: 14,
-    createdAt: '2026-01-15'
-  },
-  {
-    id: 'tenant-jaipur-crafts-102',
-    name: 'Jaipur Home Crafts',
-    slug: 'jaipur-crafts',
-    domain: 'jaipurcrafts.portside.app',
-    logoUrl: 'https://images.unsplash.com/photo-1578749556568-bc2c40e68b61?w=100&auto=format&fit=crop&q=80',
-    accountType: 'Onboarding In Progress',
-    status: 'Active',
-    primaryAdminEmail: 'priya@jaipurcrafts.com',
-    primaryAdminName: 'Priya Sharma',
-    productsCount: 124,
-    usersCount: 6,
-    createdAt: '2026-02-10'
-  },
-  {
-    id: 'tenant-fabindia-b2b-103',
-    name: 'FabIndia B2B Catalogue',
-    slug: 'fabindia-b2b',
-    domain: 'b2b.fabindia.com',
-    logoUrl: 'https://images.unsplash.com/photo-1489987707025-afc232f7ea0f?w=100&auto=format&fit=crop&q=80',
-    accountType: 'Demo',
-    status: 'Active',
-    primaryAdminEmail: 'demo@fabindia.com',
-    primaryAdminName: 'Rohan Mehra',
-    productsCount: 45,
-    usersCount: 3,
-    createdAt: '2026-02-18'
-  },
-  {
-    id: 'tenant-vintage-decor-104',
-    name: 'Vintage Decor Global',
-    slug: 'vintage-decor',
-    domain: 'vintagedecor.portside.app',
-    accountType: 'Churned',
-    status: 'Suspended',
-    primaryAdminEmail: 'support@vintagedecor.com',
-    primaryAdminName: 'Vikram Mehta',
-    productsCount: 88,
-    usersCount: 2,
-    createdAt: '2025-08-20'
-  }
-];
+import { fetchTenants, createTenantInDb, updateAccountTypeInDb, resetPasswordInDb } from '../api/tenantsApi';
 
 export const InternalPortsideDashboard: React.FC = () => {
-  const [tenants, setTenants] = useState<Tenant[]>(INITIAL_TENANTS);
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [loading, setLoading] = useState(true);
   const [accountTypeFilter, setAccountTypeFilter] = useState<'All' | AccountType>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [isProvisionModalOpen, setIsProvisionModalOpen] = useState(false);
@@ -83,6 +27,24 @@ export const InternalPortsideDashboard: React.FC = () => {
   const [adminName, setAdminName] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Fetch tenants on mount
+  const loadTenants = async () => {
+    setLoading(true);
+    try {
+      const data = await fetchTenants();
+      setTenants(data);
+    } catch (err) {
+      console.error('Error loading tenants:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadTenants();
+  }, []);
 
   // Filtered tenant list
   const filteredTenants = tenants.filter(t => {
@@ -108,44 +70,49 @@ export const InternalPortsideDashboard: React.FC = () => {
     }
   };
 
-  const handleProvisionTenant = (e: React.FormEvent) => {
+  const handleProvisionTenant = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !adminEmail || !adminPassword) return;
+    if (!name || !adminEmail) return;
 
-    const newTenant: Tenant = {
-      id: `tenant-${Date.now()}`,
-      name,
-      slug: slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-      domain: domain || `${slug || 'tenant'}.portside.app`,
-      accountType,
-      status: 'Active',
-      primaryAdminEmail: adminEmail,
-      primaryAdminName: adminName || 'System Admin',
-      productsCount: 0,
-      usersCount: 1,
-      createdAt: new Date().toISOString().split('T')[0]
-    };
+    setIsSubmitting(true);
+    try {
+      const created = await createTenantInDb({
+        name,
+        slug: slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+        domain: domain || `${slug || 'tenant'}.portside.app`,
+        accountType,
+        adminName: adminName || 'System Admin',
+        adminEmail,
+        adminPassword: adminPassword || 'AdminPass123!'
+      });
 
-    setTenants(prev => [newTenant, ...prev]);
-    setIsProvisionModalOpen(false);
+      setTenants(prev => [created, ...prev]);
+      setIsProvisionModalOpen(false);
 
-    // Reset form
-    setName('');
-    setSlug('');
-    setDomain('');
-    setAccountType('Live');
-    setAdminName('');
-    setAdminEmail('');
-    setAdminPassword('');
+      // Reset form
+      setName('');
+      setSlug('');
+      setDomain('');
+      setAccountType('Live');
+      setAdminName('');
+      setAdminEmail('');
+      setAdminPassword('');
+    } catch (err) {
+      console.error('Failed to provision tenant:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleChangeAccountType = (tenantId: string, newType: AccountType) => {
+  const handleChangeAccountType = async (tenantId: string, newType: AccountType) => {
     setTenants(prev => prev.map(t => t.id === tenantId ? { ...t, accountType: newType } : t));
+    await updateAccountTypeInDb(tenantId, newType);
   };
 
-  const handleResetPasswordSubmit = (e: React.FormEvent) => {
+  const handleResetPasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPassword || !resetModalTenant) return;
+    await resetPasswordInDb(resetModalTenant.id, newPassword);
     setResetSuccessMsg(`Password successfully updated for System Admin (${resetModalTenant.primaryAdminEmail})!`);
     setTimeout(() => {
       setResetModalTenant(null);
@@ -184,7 +151,29 @@ export const InternalPortsideDashboard: React.FC = () => {
           </h1>
         </div>
 
-        <div>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button
+            type="button"
+            style={{
+              padding: '10px 14px',
+              borderRadius: '8px',
+              backgroundColor: '#FFFFFF',
+              color: '#334155',
+              border: '1px solid #CBD5E1',
+              fontWeight: 700,
+              fontSize: '13px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+            onClick={loadTenants}
+            title="Refresh database"
+          >
+            <RefreshCw size={16} className={loading ? 'spin' : ''} />
+            <span>Sync DB</span>
+          </button>
+
           <button
             type="button"
             style={{
@@ -328,7 +317,7 @@ export const InternalPortsideDashboard: React.FC = () => {
               {filteredTenants.length === 0 ? (
                 <tr>
                   <td colSpan={7} style={{ textAlign: 'center', padding: '36px', color: '#64748B' }}>
-                    No tenants found matching your filter criteria.
+                    {loading ? 'Loading tenants from database...' : 'No tenants found matching your filter criteria.'}
                   </td>
                 </tr>
               ) : (
@@ -336,15 +325,15 @@ export const InternalPortsideDashboard: React.FC = () => {
                   const getAccountTypeBadge = (accType: AccountType) => {
                     switch (accType) {
                       case 'Live':
-                        return { bg: '#DCFCE7', color: '#15803D', label: '🟢 Live' };
+                        return { bg: '#DCFCE7', color: '#15803D' };
                       case 'Onboarding In Progress':
-                        return { bg: '#DBEAFE', color: '#1E40AF', label: '🔵 Onboarding In Progress' };
+                        return { bg: '#DBEAFE', color: '#1E40AF' };
                       case 'Demo':
-                        return { bg: '#F3E8FF', color: '#6B21A8', label: '🟣 Demo' };
+                        return { bg: '#F3E8FF', color: '#6B21A8' };
                       case 'Churned':
-                        return { bg: '#FEE2E2', color: '#B91C1C', label: '🔴 Churned' };
+                        return { bg: '#FEE2E2', color: '#B91C1C' };
                       default:
-                        return { bg: '#F1F5F9', color: '#475569', label: accType };
+                        return { bg: '#F1F5F9', color: '#475569' };
                     }
                   };
 
@@ -493,7 +482,7 @@ export const InternalPortsideDashboard: React.FC = () => {
               <div>
                 <h3 className="modal-title" style={{ fontSize: '18px', fontWeight: 800 }}>Provision New Tenant Account</h3>
                 <p style={{ fontSize: '12px', color: '#64748B', marginTop: '2px' }}>
-                  Create tenant organization and configure initial system_admin login credentials.
+                  Create tenant organization and insert system_admin into PostgreSQL database.
                 </p>
               </div>
               <button className="icon-btn-xs" onClick={() => setIsProvisionModalOpen(false)}>
@@ -612,8 +601,8 @@ export const InternalPortsideDashboard: React.FC = () => {
                 <button type="button" className="btn-secondary" onClick={() => setIsProvisionModalOpen(false)}>
                   Cancel
                 </button>
-                <button type="submit" className="btn-primary">
-                  Provision Tenant & Create System Admin
+                <button type="submit" className="btn-primary" disabled={isSubmitting}>
+                  {isSubmitting ? 'Writing to Database...' : 'Provision Tenant & Create System Admin'}
                 </button>
               </div>
             </form>
