@@ -34,12 +34,25 @@ model Tenant {
   @@index([accountType])
 }
 
+// ── 2. USER & AUTHENTICATION ──
 enum UserRole {
   SYSTEM_ADMIN
   ADMIN
   STORE_MANAGER
   SALES_REP
   CUSTOMER_USER
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  permissions String[]
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users       User[]
 }
 
 model User {
@@ -49,9 +62,16 @@ model User {
   fullName     String
   avatarUrl    String?
   role         UserRole        @default(STORE_MANAGER)
+  roleId       String?
+  customRole   Role?           @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  status       String          @default("Active")
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
 
+  customerId   String?
+  customer     Customer?       @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  catalogues   Catalogue[]     @relation("CreatedCatalogues")
+  orders       Order[]
   tenantMaps   UserTenantMap[]
 }
 
