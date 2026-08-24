@@ -15,6 +15,22 @@ async function main() {
       primaryAdminEmail: 't@port.com'
     },
     {
+      name: 'T2',
+      slug: 't2',
+      domain: 't2.com',
+      accountType: 'DEMO' as const,
+      status: 'Active',
+      primaryAdminEmail: 't2@port.com'
+    },
+    {
+      name: 'T3',
+      slug: 't3',
+      domain: 't3.com',
+      accountType: 'LIVE' as const,
+      status: 'Active',
+      primaryAdminEmail: 't3@port.com'
+    },
+    {
       name: 'Aarav Exports',
       slug: 'aarav-exports',
       domain: 'aaravexports.portside.app',
@@ -86,10 +102,10 @@ async function main() {
       }
     });
 
-    console.log(`✓ Tenant '${tenant.name}' (${tenant.slug}) synced to PostgreSQL!`);
+    console.log(`✓ Tenant '${tenant.name}' (slug: '${tenant.slug}') synced to PostgreSQL!`);
   }
 
-  console.log('Seeding finished successfully!');
+  console.log('Database sync complete!');
 }
 
 main()
