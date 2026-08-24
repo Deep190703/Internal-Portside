@@ -13,6 +13,7 @@ export const InternalPortsideDashboard: React.FC = () => {
   const [accountTypeFilter, setAccountTypeFilter] = useState<'All' | AccountType>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [isProvisionModalOpen, setIsProvisionModalOpen] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
 
   // Reset password modal state
   const [resetModalTenant, setResetModalTenant] = useState<Tenant | null>(null);
@@ -29,14 +30,14 @@ export const InternalPortsideDashboard: React.FC = () => {
   const [adminPassword, setAdminPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Fetch tenants on mount
+  // Fetch tenants directly from PostgreSQL on mount
   const loadTenants = async () => {
     setLoading(true);
     try {
       const data = await fetchTenants();
       setTenants(data);
-    } catch (err) {
-      console.error('Error loading tenants:', err);
+    } catch (err: any) {
+      console.error('Error loading tenants from PostgreSQL:', err);
     } finally {
       setLoading(false);
     }
@@ -65,28 +66,36 @@ export const InternalPortsideDashboard: React.FC = () => {
 
   const handleNameChange = (val: string) => {
     setName(val);
-    if (!slug) {
-      setSlug(val.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''));
-    }
+    setModalError(null);
+    const generatedSlug = val.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    setSlug(generatedSlug);
   };
 
   const handleProvisionTenant = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !adminEmail) return;
+    setModalError(null);
+
+    if (!name || !adminEmail) {
+      setModalError('Tenant Name and System Admin Email are required.');
+      return;
+    }
+
+    const finalSlug = (slug || name).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 
     setIsSubmitting(true);
     try {
-      const created = await createTenantInDb({
+      await createTenantInDb({
         name,
-        slug: slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-        domain: domain || `${slug || 'tenant'}.portside.app`,
+        slug: finalSlug,
+        domain: domain || `${finalSlug}.portside.app`,
         accountType,
         adminName: adminName || 'System Admin',
         adminEmail,
         adminPassword: adminPassword || 'AdminPass123!'
       });
 
-      setTenants(prev => [created, ...prev]);
+      // Reload fresh rows from PostgreSQL database
+      await loadTenants();
       setIsProvisionModalOpen(false);
 
       // Reset form
@@ -97,8 +106,10 @@ export const InternalPortsideDashboard: React.FC = () => {
       setAdminName('');
       setAdminEmail('');
       setAdminPassword('');
-    } catch (err) {
+      setModalError(null);
+    } catch (err: any) {
       console.error('Failed to provision tenant:', err);
+      setModalError(err.message || 'Failed to create tenant in database.');
     } finally {
       setIsSubmitting(false);
     }
@@ -106,19 +117,28 @@ export const InternalPortsideDashboard: React.FC = () => {
 
   const handleChangeAccountType = async (tenantId: string, newType: AccountType) => {
     setTenants(prev => prev.map(t => t.id === tenantId ? { ...t, accountType: newType } : t));
-    await updateAccountTypeInDb(tenantId, newType);
+    try {
+      await updateAccountTypeInDb(tenantId, newType);
+      await loadTenants();
+    } catch (err) {
+      console.error('Account type update error:', err);
+    }
   };
 
   const handleResetPasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPassword || !resetModalTenant) return;
-    await resetPasswordInDb(resetModalTenant.id, newPassword);
-    setResetSuccessMsg(`Password successfully updated for System Admin (${resetModalTenant.primaryAdminEmail})!`);
-    setTimeout(() => {
-      setResetModalTenant(null);
-      setNewPassword('');
-      setResetSuccessMsg('');
-    }, 1800);
+    try {
+      await resetPasswordInDb(resetModalTenant.id, newPassword);
+      setResetSuccessMsg(`Password successfully updated for System Admin (${resetModalTenant.primaryAdminEmail})!`);
+      setTimeout(() => {
+        setResetModalTenant(null);
+        setNewPassword('');
+        setResetSuccessMsg('');
+      }, 1800);
+    } catch (err: any) {
+      alert(err.message || 'Password update failed');
+    }
   };
 
   return (
@@ -168,7 +188,7 @@ export const InternalPortsideDashboard: React.FC = () => {
               gap: '6px'
             }}
             onClick={loadTenants}
-            title="Refresh database"
+            title="Refresh database rows"
           >
             <RefreshCw size={16} className={loading ? 'spin' : ''} />
             <span>Sync DB</span>
@@ -190,7 +210,10 @@ export const InternalPortsideDashboard: React.FC = () => {
               gap: '8px',
               boxShadow: '0 4px 12px rgba(79,70,229,0.25)'
             }}
-            onClick={() => setIsProvisionModalOpen(true)}
+            onClick={() => {
+              setModalError(null);
+              setIsProvisionModalOpen(true);
+            }}
           >
             <Plus size={18} />
             <span>Provision New Tenant</span>
@@ -203,7 +226,7 @@ export const InternalPortsideDashboard: React.FC = () => {
         <div style={{ backgroundColor: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '18px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
           <div style={{ fontSize: '12px', fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>Total Tenants</div>
           <div style={{ fontSize: '26px', fontWeight: 900, color: '#0F172A', marginTop: '6px' }}>{totalTenants}</div>
-          <div style={{ fontSize: '11.5px', color: '#64748B', marginTop: '4px' }}>Active database schemas</div>
+          <div style={{ fontSize: '11.5px', color: '#64748B', marginTop: '4px' }}>PostgreSQL Tenant rows</div>
         </div>
 
         <div style={{ backgroundColor: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: '12px', padding: '18px 20px' }}>
@@ -317,7 +340,7 @@ export const InternalPortsideDashboard: React.FC = () => {
               {filteredTenants.length === 0 ? (
                 <tr>
                   <td colSpan={7} style={{ textAlign: 'center', padding: '36px', color: '#64748B' }}>
-                    {loading ? 'Loading tenants from database...' : 'No tenants found matching your filter criteria.'}
+                    {loading ? 'Loading tenants directly from PostgreSQL Neon DB...' : 'No tenants found matching your filter criteria.'}
                   </td>
                 </tr>
               ) : (
@@ -482,13 +505,20 @@ export const InternalPortsideDashboard: React.FC = () => {
               <div>
                 <h3 className="modal-title" style={{ fontSize: '18px', fontWeight: 800 }}>Provision New Tenant Account</h3>
                 <p style={{ fontSize: '12px', color: '#64748B', marginTop: '2px' }}>
-                  Create tenant organization and insert system_admin into PostgreSQL database.
+                  Creates a real SQL row in PostgreSQL Tenant table & system_admin User table.
                 </p>
               </div>
               <button className="icon-btn-xs" onClick={() => setIsProvisionModalOpen(false)}>
                 <X size={18} />
               </button>
             </div>
+
+            {modalError && (
+              <div style={{ padding: '12px 14px', backgroundColor: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '8px', color: '#991B1B', fontSize: '13px', fontWeight: 600, marginTop: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <AlertTriangle size={16} color="#DC2626" />
+                <span>{modalError}</span>
+              </div>
+            )}
 
             <form onSubmit={handleProvisionTenant} style={{ marginTop: '16px' }}>
               {/* Section 1: Tenant Information */}
@@ -512,13 +542,16 @@ export const InternalPortsideDashboard: React.FC = () => {
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '10px' }}>
                   <div className="form-group">
-                    <label className="form-label">Tenant Slug Code</label>
+                    <label className="form-label">Tenant Slug Code (Unique)</label>
                     <input
                       type="text"
                       className="form-input"
                       placeholder="fabindia-b2b"
                       value={slug}
-                      onChange={(e) => setSlug(e.target.value)}
+                      onChange={(e) => {
+                        setSlug(e.target.value);
+                        setModalError(null);
+                      }}
                       required
                     />
                   </div>
@@ -602,7 +635,7 @@ export const InternalPortsideDashboard: React.FC = () => {
                   Cancel
                 </button>
                 <button type="submit" className="btn-primary" disabled={isSubmitting}>
-                  {isSubmitting ? 'Writing to Database...' : 'Provision Tenant & Create System Admin'}
+                  {isSubmitting ? 'Inserting SQL Row...' : 'Provision Tenant & Create System Admin'}
                 </button>
               </div>
             </form>

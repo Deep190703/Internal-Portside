@@ -33,7 +33,6 @@ const mapAccountTypeFromPrisma = (type: AccountType): string => {
 };
 
 export default async function handler(req: any, res: any) {
-  // Enable CORS
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,PUT,DELETE,OPTIONS');
@@ -45,7 +44,7 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    // GET /api/tenants — Fetch all tenants from PostgreSQL database
+    // GET /api/tenants — Fetch all tenants directly from PostgreSQL
     if (req.method === 'GET') {
       const dbTenants = await prisma.tenant.findMany({
         orderBy: { createdAt: 'desc' },
@@ -73,7 +72,7 @@ export default async function handler(req: any, res: any) {
       return res.status(200).json({ success: true, tenants: formatted });
     }
 
-    // POST /api/tenants — Provision a new Tenant in PostgreSQL
+    // POST /api/tenants — Create a new Tenant in PostgreSQL
     if (req.method === 'POST') {
       const { name, slug, domain, accountType, adminName, adminEmail, adminPassword } = req.body || {};
 
@@ -81,37 +80,39 @@ export default async function handler(req: any, res: any) {
         return res.status(400).json({ success: false, error: 'Tenant Name and Slug are required.' });
       }
 
-      // Check if tenant slug already exists
-      const existing = await prisma.tenant.findUnique({ where: { slug } });
-      if (existing) {
-        return res.status(400).json({ success: false, error: `Tenant slug '${slug}' already exists in database.` });
+      const cleanSlug = slug.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+
+      // Explicitly check for duplicate slug
+      const existingSlug = await prisma.tenant.findUnique({ where: { slug: cleanSlug } });
+      if (existingSlug) {
+        return res.status(400).json({ 
+          success: false, 
+          error: `Tenant slug '${cleanSlug}' is already taken by '${existingSlug.name}' in PostgreSQL. Please enter a unique slug (e.g. ${cleanSlug}-1).` 
+        });
       }
 
       const prismaAccType = mapAccountTypeToPrisma(accountType || 'Live');
 
-      // Execute transaction to insert Tenant, System Admin User, and UserTenantMap into PostgreSQL
       const result = await prisma.$transaction(async (tx) => {
-        // 1. Create Tenant row
         const newTenant = await tx.tenant.create({
           data: {
             name,
-            slug,
-            domain: domain || `${slug}.portside.app`,
+            slug: cleanSlug,
+            domain: domain || `${cleanSlug}.portside.app`,
             accountType: prismaAccType,
             status: 'Active',
-            primaryAdminEmail: adminEmail || `admin@${slug}.com`
+            primaryAdminEmail: adminEmail || `admin@${cleanSlug}.com`
           }
         });
 
-        // 2. Create or find System Admin User
         let user = await tx.user.findUnique({
-          where: { email: adminEmail || `admin@${slug}.com` }
+          where: { email: adminEmail || `admin@${cleanSlug}.com` }
         });
 
         if (!user) {
           user = await tx.user.create({
             data: {
-              email: adminEmail || `admin@${slug}.com`,
+              email: adminEmail || `admin@${cleanSlug}.com`,
               fullName: adminName || 'System Admin',
               passwordHash: adminPassword || 'AdminPass123!',
               role: 'SYSTEM_ADMIN'
@@ -119,7 +120,6 @@ export default async function handler(req: any, res: any) {
           });
         }
 
-        // 3. Create UserTenantMap link
         await tx.userTenantMap.create({
           data: {
             userId: user.id,
@@ -130,6 +130,8 @@ export default async function handler(req: any, res: any) {
 
         return newTenant;
       });
+
+      console.log(`[PostgreSQL DB] Successfully created Tenant '${result.name}' (slug: ${result.slug})`);
 
       return res.status(201).json({
         success: true,
@@ -149,7 +151,7 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    // PATCH /api/tenants — Update Account Type or Reset Password in PostgreSQL
+    // PATCH /api/tenants — Update Account Type or Password
     if (req.method === 'PATCH') {
       const { tenantId, accountType, newPassword } = req.body || {};
 
