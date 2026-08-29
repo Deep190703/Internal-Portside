@@ -1,3 +1,6 @@
+// This is your Prisma schema file for Portside B2B Catalogue Platform
+// Learn more about it in the docs: https://pris.ly/d/prisma-schema
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,6 +10,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ── 1. MULTI-TENANCY ──
 enum AccountType {
   LIVE
   ONBOARDING_IN_PROGRESS
@@ -28,12 +32,32 @@ model Tenant {
   createdAt           DateTime     @default(now())
   updatedAt           DateTime     @updatedAt
 
-  userMaps          UserTenantMap[]
-  products          Product[]
-  attributes        ProductAttribute[]
+  userMaps      UserTenantMap[]
+  products      Product[]
+  attributes    ProductAttribute[]
+  changeLogs    SettingsChangeLog[]
 
   @@index([slug])
   @@index([accountType])
+}
+
+// ── SETTINGS CHANGE AUDIT LOG ──
+// Tracks every change made to tenant-level settings (card preview, general, etc.)
+model SettingsChangeLog {
+  id              String   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  settingType     String   // e.g. "cardPreviewSettings", "generalSettings"
+  changedByEmail  String   // Email of the user who made the change
+  changedByName   String?  // Display name of the user
+  previousValue   Json?    @db.JsonB  // Snapshot of settings BEFORE the change
+  newValue        Json     @db.JsonB  // Snapshot of settings AFTER the change
+  changeNote      String?  // Optional note / reason for the change
+  createdAt       DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([tenantId, settingType])
+  @@index([createdAt])
 }
 
 // ── 2. USER & AUTHENTICATION ──
@@ -69,7 +93,7 @@ model User {
   status       String          @default("Active")
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
-
+  
   customerId   String?
   customer     Customer?       @relation(fields: [customerId], references: [id], onDelete: SetNull)
   catalogues   Catalogue[]     @relation("CreatedCatalogues")
@@ -82,63 +106,207 @@ model UserTenantMap {
   userId    String
   tenantId  String
   role      UserRole @default(STORE_MANAGER)
-  createdAt DateTime @default(now())
-
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
 
   @@unique([userId, tenantId])
-}
-
-model Product {
-  id               String                 @id @default(uuid())
-  tenantId         String
-  referenceId      String?
-  sku              String
-  title            String
-  show             Boolean                @default(true)
-  status           String                 @default("ACTIVE")
-  minPrice         Float
-  maxPrice         Float
-  moq              Int                    @default(50)
-  stockCount       Int                    @default(100)
-  images           String[]
-  hinges           Json?
-  createdAt        DateTime               @default(now())
-  updatedAt        DateTime               @updatedAt
-
-  tenant           Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  attributeValues  ProductAttributeValue[]
-
   @@index([tenantId])
-  @@index([sku])
 }
 
-model ProductAttribute {
-  id           String                 @id @default(uuid())
-  tenantId     String
-  name         String
-  section      String
-  type         String
-  defaultValue String?
-  options      String[]
-  createdAt    DateTime               @default(now())
+// ── 3. B2B CUSTOMER CLIENTS ──
+model Customer {
+  id          String      @id @default(uuid())
+  companyName String
+  contactName String
+  email       String      @unique
+  phone       String?
+  taxId       String?     // GST / VAT Number
+  tier        String      @default("Standard") // e.g. Gold, Silver, VIP
+  status      String      @default("Active")   // Active, Inactive, Pending
+  avatarUrl   String?
+  location    String?
+  assignedRep String?
+  notes       String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
 
-  tenant       Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  users       User[]
+  catalogues  Catalogue[] @relation("AssignedCatalogues")
+  orders      Order[]
+}
+
+// ── 4. PRODUCT CATEGORIES ──
+model Category {
+  id          String     @id @default(uuid())
+  name        String     @unique
+  slug        String     @unique
+  description String?
+  imageUrl    String?
+  parentId    String?
+  parent      Category?  @relation("ParentChild", fields: [parentId], references: [id])
+  children    Category[] @relation("ParentChild")
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  products    Product[]
+}
+
+// ── 5. MASTER PRODUCT ATTRIBUTES (EAV DEFINITIONS PER TENANT) ──
+model ProductAttribute {
+  id           String                  @id @default(uuid())
+  tenantId     String
+  tenant       Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name         String                  // e.g. "Fabric Composition", "Weave Type", "Closure Type"
+  section      String                  @default("Specifications") // "Specifications", "Packing & Shipping", "Compliance"
+  type         String                  @default("Text") // "Text", "Number", "Date", "Single Select", "Multi Select"
+  defaultValue String?
+  options      String[]                // Options array for Single/Multi Select
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+
   values       ProductAttributeValue[]
 
   @@unique([tenantId, name])
+  @@index([tenantId])
 }
 
+// ── 6. PRODUCTS & VARIANTS ──
+model Product {
+  id                String                  @id @default(uuid())
+  tenantId          String?                 // Multi-tenant Foreign Key
+  tenant            Tenant?                 @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  referenceId       String?                 // Internal ERP / Reference ID
+  groupId           String?                 // Editable Group ID linking variant SKUs together
+  primaryVariantSku String?                 // Designated primary variant SKU for parent card display
+  sku               String                  @unique
+  title             String
+  description       String?                 @db.Text
+  categoryId        String
+  category          Category                @relation(fields: [categoryId], references: [id])
+  
+  minPrice          Decimal                 @db.Decimal(10, 2)
+  maxPrice          Decimal                 @db.Decimal(10, 2)
+  inStock           Boolean                 @default(true)
+  stockCount        Int                     @default(0)
+  moq               Int                     @default(1)
+  leadTime          String                  @default("7-10 Days")
+  images            String[]                // Array of image URLs
+  
+  show              Boolean                 @default(true)  // True = visible on platform, False = hidden & in exports
+  status            String                  @default("ACTIVE") // ACTIVE, DRAFT, ARCHIVED (Soft Deleted)
+  hinges            Json?                   @db.JsonB      // Array of Hinge configurations (Chip vs Image)
+
+  customAttributes  Json?                   @db.JsonB      // Optional JSON fallback
+  
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+
+  variants          ProductVariant[]
+  attributeValues   ProductAttributeValue[]
+  catalogueItems    CatalogueItem[]
+  orderItems        OrderItem[]
+
+  @@index([tenantId])
+  @@index([status])
+  @@index([show])
+}
+
+// ── 7. PRODUCT ATTRIBUTE VALUES (EAV JUNCTION TABLE) ──
 model ProductAttributeValue {
   id          String           @id @default(uuid())
   productId   String
+  product     Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
   attributeId String
-  value       String
+  attribute   ProductAttribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  value       String           // Assigned value e.g. "100% Natural Jute & Cotton"
+
   createdAt   DateTime         @default(now())
 
-  product     Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
-  attribute   ProductAttribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
-
   @@unique([productId, attributeId])
+  @@index([productId])
+  @@index([attributeId])
+}
+
+model ProductVariant {
+  id           String   @id @default(uuid())
+  productId    String
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sku          String   @unique
+  title        String   // e.g. "Red / Large"
+  optionValues Json     // e.g. { "Color": "Red", "Size": "L" }
+  price        Decimal  @db.Decimal(10, 2)
+  stockCount   Int      @default(0)
+  imageUrl     String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// ── 8. CATALOGUES (SHARED B2B PRESENTATIONS) ──
+model Catalogue {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  isPublic    Boolean  @default(false)
+  accessPass  String?  // Password / PIN for buyer access
+  
+  createdById String
+  createdBy   User     @relation("CreatedCatalogues", fields: [createdById], references: [id])
+  
+  customerId  String?
+  customer    Customer? @relation("AssignedCatalogues", fields: [customerId], references: [id], onDelete: SetNull)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items       CatalogueItem[]
+}
+
+model CatalogueItem {
+  id          String    @id @default(uuid())
+  catalogueId String
+  catalogue   Catalogue @relation(fields: [catalogueId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  customPrice Decimal?  @db.Decimal(10, 2) // Optional discounted B2B price for this catalogue
+  position    Int       @default(0)
+  
+  @@unique([catalogueId, productId])
+}
+
+// ── 9. ORDERS & QUOTATIONS ──
+enum OrderStatus {
+  DRAFT
+  QUOTATION_SENT
+  CONFIRMED
+  IN_PRODUCTION
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+model Order {
+  id          String      @id @default(uuid())
+  orderNumber String      @unique
+  customerId  String
+  customer    Customer    @relation(fields: [customerId], references: [id])
+  createdById String
+  createdBy   User        @relation(fields: [createdById], references: [id])
+  status      OrderStatus @default(DRAFT)
+  totalAmount Decimal     @db.Decimal(12, 2)
+  notes       String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  items       OrderItem[]
+}
+
+model OrderItem {
+  id        String   @id @default(uuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  quantity  Int
+  unitPrice Decimal  @db.Decimal(10, 2)
 }
