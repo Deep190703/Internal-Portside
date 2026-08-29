@@ -15,16 +15,18 @@ enum AccountType {
 }
 
 model Tenant {
-  id                String       @id @default(uuid())
-  name              String
-  slug              String       @unique
-  domain            String?
-  logoUrl           String?
-  accountType       AccountType  @default(LIVE)
-  status            String       @default("Active")
-  primaryAdminEmail String?
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
+  id                  String       @id @default(uuid())
+  name                String       // e.g. "Aarav Exports", "Global Home Crafts"
+  slug                String       @unique // e.g. "aarav-exports"
+  domain              String?
+  logoUrl             String?
+  accountType         AccountType  @default(LIVE)
+  status              String       @default("Active")
+  primaryAdminEmail   String?
+  cardPreviewSettings Json?        @db.JsonB  // Multi-tenant Card Grid customization settings
+  generalSettings     Json?        @db.JsonB  // General store preferences per tenant
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
 
   userMaps          UserTenantMap[]
   products          Product[]
