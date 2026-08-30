@@ -48,6 +48,7 @@ model SettingsChangeLog {
   tenantId        String
   tenant          Tenant   @relation(fields: [tenantId], references: [id])
   settingType     String   // e.g. "cardPreviewSettings", "generalSettings"
+  changedByUserId String?  // User UUID hex string
   changedByEmail  String   // Email of the user who made the change
   changedByName   String?  // Display name of the user
   previousValue   Json?    @db.JsonB  // Snapshot of settings BEFORE the change
@@ -57,6 +58,7 @@ model SettingsChangeLog {
 
   @@index([tenantId])
   @@index([tenantId, settingType])
+  @@index([changedByUserId])
   @@index([createdAt])
 }
 
