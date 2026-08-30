@@ -29,6 +29,73 @@ function expressApiMiddleware() {
     name: 'express-api-middleware',
     configureServer(server: any) {
       server.middlewares.use(async (req: any, res: any, next: any) => {
+        if (req.url?.startsWith('/api/all-users')) {
+          res.setHeader('Content-Type', 'application/json');
+          try {
+            if (req.method === 'GET') {
+              const dbUsers = await prisma.user.findMany({
+                orderBy: { createdAt: 'desc' },
+                include: {
+                  customRole: true,
+                  tenantMaps: { include: { tenant: true } }
+                }
+              });
+
+              const defaultTenant = await prisma.tenant.findFirst({ where: { slug: 'aarav-exports' } });
+
+              const formatted = dbUsers.map(u => {
+                const primaryMap = u.tenantMaps?.[0];
+                const tenantObj = primaryMap?.tenant || defaultTenant;
+                return {
+                  id: u.id,
+                  name: u.fullName || 'User',
+                  email: u.email,
+                  role: u.customRole?.name || (u.role === 'ADMIN' ? 'Admin' : u.role === 'SYSTEM_ADMIN' ? 'System Admin' : 'Store Manager'),
+                  roleId: u.roleId,
+                  status: u.status || 'Active',
+                  initials: (u.fullName || u.email).slice(0, 2).toUpperCase(),
+                  tenantId: tenantObj?.id || 'default-tenant',
+                  tenantName: tenantObj?.name || 'Aarav Exports',
+                  tenantSlug: tenantObj?.slug || 'aarav-exports',
+                  createdAt: u.createdAt.toISOString().split('T')[0]
+                };
+              });
+
+              res.statusCode = 200;
+              res.end(JSON.stringify({ success: true, users: formatted }));
+              return;
+            }
+
+            if (req.method === 'DELETE') {
+              const url = new URL(req.url, `http://${req.headers.host}`);
+              const id = url.searchParams.get('id');
+              if (id) {
+                await prisma.user.delete({ where: { id } });
+              }
+              res.statusCode = 200;
+              res.end(JSON.stringify({ success: true, message: 'User deleted' }));
+              return;
+            }
+
+            if (req.method === 'PATCH') {
+              let body = '';
+              for await (const chunk of req) { body += chunk; }
+              const data = JSON.parse(body || '{}');
+              const { id, status } = data;
+              if (id && status) {
+                await prisma.user.update({ where: { id }, data: { status } });
+              }
+              res.statusCode = 200;
+              res.end(JSON.stringify({ success: true, message: 'Updated' }));
+              return;
+            }
+          } catch (err: any) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ success: false, error: err.message }));
+            return;
+          }
+        }
+
         if (!req.url?.startsWith('/api/tenants')) {
           return next();
         }

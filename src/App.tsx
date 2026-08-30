@@ -2,6 +2,7 @@ import { Route, Switch } from 'wouter';
 import { InternalSidebar } from './components/InternalSidebar';
 import { InternalPortsideDashboard } from './components/InternalPortsideDashboard';
 import { AccountAnalyticsPage } from './components/AccountAnalyticsPage';
+import { UserDirectoryPage } from './components/UserDirectoryPage';
 
 export function App() {
   return (
@@ -14,6 +15,7 @@ export function App() {
         <Switch>
           <Route path="/" component={InternalPortsideDashboard} />
           <Route path="/tenants" component={InternalPortsideDashboard} />
+          <Route path="/users" component={UserDirectoryPage} />
           <Route path="/analytics" component={AccountAnalyticsPage} />
           <Route path="/team" component={InternalPortsideDashboard} />
           <Route path="/settings" component={InternalPortsideDashboard} />

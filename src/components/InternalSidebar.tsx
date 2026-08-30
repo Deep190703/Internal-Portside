@@ -8,6 +8,7 @@ export const InternalSidebar: React.FC = () => {
   const [location, setLocation] = useLocation();
 
   const getActiveItem = () => {
+    if (location.includes('/users')) return 'users';
     if (location.includes('/analytics')) return 'analytics';
     if (location.includes('/team')) return 'team';
     if (location.includes('/settings')) return 'settings';
@@ -87,6 +88,32 @@ export const InternalSidebar: React.FC = () => {
               >
                 <Building2 size={18} color={activeItem === 'tenants' ? '#38BDF8' : '#64748B'} />
                 <span>Tenants Directory</span>
+              </button>
+            </li>
+
+            <li>
+              <button
+                type="button"
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  backgroundColor: activeItem === 'users' ? '#1E293B' : 'transparent',
+                  color: activeItem === 'users' ? '#38BDF8' : '#94A3B8',
+                  fontWeight: activeItem === 'users' ? 700 : 500,
+                  fontSize: '13.5px',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  transition: 'all 0.15s ease'
+                }}
+                onClick={() => setLocation('/users')}
+              >
+                <Users size={18} color={activeItem === 'users' ? '#38BDF8' : '#64748B'} />
+                <span>User Directory</span>
               </button>
             </li>
 
